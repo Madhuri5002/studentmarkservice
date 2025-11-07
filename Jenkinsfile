@@ -1,60 +1,60 @@
 pipeline {
     agent any
+
     environment {
-        APP_NAME = "studentmarkservice"
-        APP_NAMESPACE = "${APP_NAME}-ns"
-        IMAGE_NAME = "${APP_NAME}-image"
-        IMAGE_TAG = "${BUILD_NUMBER}${BUILD_NUMBER}"
-        APP_PORT = 8100
-        NODE_PORT = 30081
-        REPLICA_COUNT = 2
+        APP_NAME       = "studentmarkservice"
+        APP_NAMESPACE  = "${APP_NAME}-ns"
+        IMAGE_NAME     = "${APP_NAME}-image"
+        IMAGE_TAG      = "${BUILD_NUMBER}"     // correct tag = build number only
+        APP_PORT       = "8100"
+        NODE_PORT      = "30081"
+        REPLICA_COUNT  = "2"
+        KUBE_CONFIG    = "c:\\users\\test\\.kube\\config"
     }
+
     stages {
+
         stage('Checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/Madhuri5002/studentmarkservice.git'
             }
         }
-        stage('Build') {
+
+        stage('Build Docker Image') {
             steps {
-                // Build docker image using Dockerfile
                 bat "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -f Dockerfile ."
             }
         }
-        /*
-        stage('Run Container') {
-            steps {
-                script {
-                    // Run docker container instance
-                    bat "docker run -d --name ${APP_NAME} -p 8100:8100 ${IMAGE_NAME}:${IMAGE_TAG}"
-                }
-            }
-        }
-        */
-        stage('K8s Container Deployment') {
-            steps {
-                script {
-                    withEnv(["KUBECONFIG=c:\\users\\test\\.kube\\config"]) {
-                        // Replace variables in YAML and create concrete files:
-                        bat "envsubst < k8s/namespace-template.yaml > k8s/namespace.yaml"
-                        bat "envsubst < k8s/deployment-template.yaml > k8s/deployment.yaml"
-                        bat "envsubst < k8s/service-template.yaml > k8s/service.yaml"
 
-                        // Apply manifests
-                        bat "kubectl apply -f k8s/namespace.yaml --validate=false"
-                        bat "kubectl apply -f k8s/deployment.yaml --validate=false"
-                        bat "kubectl apply -f k8s/service.yaml --validate=false"
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    withEnv(["KUBECONFIG=${KUBE_CONFIG}"]) {
+
+                        // first-time creation (if not created before)
+                        bat "kubectl apply -f k8s/namespace-template.yaml --validate=false"
+                        bat "kubectl apply -f k8s/service-template.yaml --validate=false"
+
+                        // update deployment image
+                        bat "kubectl set image deployment/studentmarkservice-deployment studentmarkservice=${IMAGE_NAME}:${IMAGE_TAG} -n ${APP_NAMESPACE}"
+
+                        // if deployment does not exist, create it
+                        bat "kubectl apply -f k8s/deployment-template.yaml --validate=false"
+
+                        // wait for rollout completion
+                        bat "kubectl rollout status deployment/studentmarkservice-deployment -n ${APP_NAMESPACE} --timeout=120s"
                     }
                 }
             }
         }
     }
+
     post {
         success {
-            echo "✅ Checkout, Build, Dockerize & Deploy completed successfully!"
+            echo "✅ Build & Deployment Successful!"
         }
         failure {
-            echo "❌ Build failed!"
+            echo "❌ Build Failed!"
         }
     }
 }
